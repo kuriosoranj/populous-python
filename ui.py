@@ -1,272 +1,249 @@
 """
-Populous Python - HUD & UI
+Populous: The Beginning — HUD
 
-Bottom panel with mana bar, power selector, and population counters.
-Also draws the minimap overlay.
+Bottom spell bar (PTB-style icon row), mana bar, follower count, minimap.
 """
 
 from __future__ import annotations
-
-import math
-import pygame
+import math, pygame
 from typing import TYPE_CHECKING
-
 from constants import (
     SCREEN_W, SCREEN_H, HUD_H, MINIMAP_SZ,
-    POWER_NAMES, POWER_COSTS, MAX_MANA,
-    P_RAISE, P_LOWER, P_QUAKE, P_VOLCANO, P_FLOOD, P_ARMA,
-    PLAYER, ENEMY,
-    C_PLAYER, C_ENEMY,
+    SPELL_NAMES, SPELL_COSTS, MAX_MANA, SPELL_KEYS,
+    SP_BLAST,SP_LIGHTNING,SP_LANDBRIDGE,SP_SWAMP,
+    SP_VOLCANO,SP_FLATTEN,SP_FIRESTORM,SP_ARMAGEDDON,
+    PLAYER, ENEMY, C_PLAYER, C_ENEMY,
 )
-
 if TYPE_CHECKING:
     from game import Game
 
-# Power icon colours
-POWER_COLOURS = {
-    P_RAISE:   (80,  200,  80),
-    P_LOWER:   (200,  80,  80),
-    P_QUAKE:   (255, 200,  50),
-    P_VOLCANO: (255, 120,  30),
-    P_FLOOD:   (50,  100, 255),
-    P_ARMA:    (200,  50, 200),
+_SPELL_ICONS = {
+    SP_BLAST:      ((255,160,40),   'blast'),
+    SP_LIGHTNING:  ((200,220,255),  'bolt'),
+    SP_LANDBRIDGE: ((150,200,120),  'bridge'),
+    SP_SWAMP:      ((80, 140, 50),  'swamp'),
+    SP_VOLCANO:    ((255,100,30),   'volcano'),
+    SP_FLATTEN:    ((180,200,120),  'flatten'),
+    SP_FIRESTORM:  ((255,60, 20),   'firestorm'),
+    SP_ARMAGEDDON: ((200,40, 200),  'arma'),
 }
 
 
 class HUD:
-    """Renders the bottom HUD panel and minimap."""
-
-    def __init__(self, screen: pygame.Surface):
-        self.screen = screen
+    def __init__(self, screen:pygame.Surface):
+        self.screen=screen
         pygame.font.init()
-        self._font_sm = pygame.font.SysFont("monospace", 13)
-        self._font_md = pygame.font.SysFont("monospace", 16, bold=True)
-        self._font_lg = pygame.font.SysFont("monospace", 22, bold=True)
+        self._f12=pygame.font.SysFont("monospace",12)
+        self._f14=pygame.font.SysFont("monospace",14,bold=True)
+        self._f20=pygame.font.SysFont("monospace",20,bold=True)
+        self._f26=pygame.font.SysFont("monospace",26,bold=True)
+        self._tick=0.0
+        self._spell_rects=[]
+        self._notifications=[]
+        self._panel=pygame.Surface((SCREEN_W,HUD_H),pygame.SRCALPHA)
 
-        self._panel_surf = pygame.Surface((SCREEN_W, HUD_H), pygame.SRCALPHA)
-        self._power_rects: list[pygame.Rect] = []
-        self._tick = 0.0
+    def update(self,dt):
+        self._tick+=dt
+        self._notifications=[n for n in self._notifications if n['life']>0]
+        for n in self._notifications: n['life']-=dt
 
-        # Notification messages
-        self._notifications: list[dict] = []
+    def draw(self,game:'Game'):
+        self._panel.fill((0,0,0,0))
+        self._bg()
+        self._mana(game.mana)
+        self._spells(game.selected_spell,game.mana)
+        self._population(game)
+        self.screen.blit(self._panel,(0,SCREEN_H-HUD_H))
 
-    # ------------------------------------------------------------------ #
-    #  Public draw                                                         #
-    # ------------------------------------------------------------------ #
-
-    def update(self, dt: float):
-        self._tick += dt
-        self._notifications = [n for n in self._notifications
-                                if n['life'] > 0]
-        for n in self._notifications:
-            n['life'] -= dt
-
-    def draw(self, game: 'Game'):
-        self._panel_surf.fill((0, 0, 0, 0))
-        self._draw_panel_bg()
-        self._draw_mana_bar(game.mana)
-        self._draw_power_buttons(game.selected_power, game.mana)
-        self._draw_population(game)
+        mm=game.renderer.draw_minimap(game.terrain,
+                                       game.settlers+game.buildings+
+                                       ([game.player_shaman] if game.player_shaman else [])+
+                                       ([game.enemy_shaman]  if game.enemy_shaman  else []))
+        self.screen.blit(mm,(SCREEN_W-MINIMAP_SZ-8,8))
         self._draw_notifications()
 
-        self.screen.blit(self._panel_surf, (0, SCREEN_H - HUD_H))
+    def notify(self,text,colour=(255,240,80)):
+        self._notifications.append({'text':text,'colour':colour,'life':3.5})
 
-        # Minimap (top-right corner)
-        mm = game.renderer.draw_minimap(game.terrain, game.settlers + game.buildings)
-        self.screen.blit(mm, (SCREEN_W - MINIMAP_SZ - 8, 8))
-
-    def notify(self, text: str, colour=(255, 255, 100)):
-        self._notifications.append({'text': text, 'colour': colour, 'life': 3.0})
-
-    # ------------------------------------------------------------------ #
-    #  Click handling                                                      #
-    # ------------------------------------------------------------------ #
-
-    def handle_click(self, sx: int, sy: int) -> int | None:
-        """Return selected power index if a power button was clicked, else None."""
-        panel_y = sy - (SCREEN_H - HUD_H)
-        if panel_y < 0:
-            return None
-        for i, rect in enumerate(self._power_rects):
-            if rect.collidepoint(sx, panel_y):
-                return i
+    def handle_click(self,sx,sy)->int|None:
+        py=sy-(SCREEN_H-HUD_H)
+        if py<0: return None
+        for i,rect in enumerate(self._spell_rects):
+            if rect.collidepoint(sx,py): return i
         return None
 
     # ------------------------------------------------------------------ #
-    #  Internal drawing                                                    #
-    # ------------------------------------------------------------------ #
 
-    def _draw_panel_bg(self):
-        # Dark translucent panel
-        pygame.draw.rect(self._panel_surf, (12, 10, 22, 230),
-                         (0, 0, SCREEN_W, HUD_H))
-        # Top edge glow
-        for i in range(4):
-            alpha = 120 - i * 25
-            pygame.draw.line(self._panel_surf, (80, 140, 255, alpha),
-                             (0, i), (SCREEN_W, i))
+    def _bg(self):
+        pygame.draw.rect(self._panel,(12,10,22,240),(0,0,SCREEN_W,HUD_H))
+        # Ornate top edge
+        for i in range(3):
+            a=110-i*35
+            pygame.draw.line(self._panel,(80,150,255,a),(0,i),(SCREEN_W,i))
 
-    def _draw_mana_bar(self, mana: float):
+    def _mana(self,mana):
+        # Globe-style mana indicator on the left
+        gx,gy=60,HUD_H//2; gr=36
+        # Outer ring
+        pygame.draw.circle(self._panel,(30,20,60),  (gx,gy),gr)
+        pygame.draw.circle(self._panel,(60,40,120), (gx,gy),gr,2)
+        # Fill based on mana
+        frac=mana/MAX_MANA
+        fill_h=int(gr*2*frac)
+        fill_y=gy+gr-fill_h
+        clip=pygame.Surface((gr*2,gr*2),pygame.SRCALPHA)
+        pygame.draw.circle(clip,(0,0,0,0),(gr,gr),gr)  # clear
+        pulse=0.8+0.2*math.sin(self._tick*2.5)
+        bc=int(60*pulse); gc=int(160*pulse); rc=int(255*pulse)
+        pygame.draw.rect(clip,(rc,gc,bc,220),(0,gr*2-fill_h,gr*2,fill_h))
+        # Clip to circle
+        mask=pygame.Surface((gr*2,gr*2),pygame.SRCALPHA)
+        pygame.draw.circle(mask,(255,255,255,255),(gr,gr),gr-2)
+        clip.blit(mask,(0,0),special_flags=pygame.BLEND_RGBA_MULT)
+        self._panel.blit(clip,(gx-gr,gy-gr))
+        # Shine
+        pygame.draw.circle(self._panel,(140,180,255,60),(gx-gr//3,gy-gr//3),gr//3)
+        pygame.draw.circle(self._panel,(80,100,200),    (gx,gy),gr,2)
         # Label
-        lbl = self._font_md.render("MANA", True, (140, 180, 255))
-        self._panel_surf.blit(lbl, (16, 12))
+        lbl=self._f12.render(f"{int(mana)}/{int(MAX_MANA)}",True,(160,210,255))
+        self._panel.blit(lbl,(gx-lbl.get_width()//2,gy+gr+4))
 
-        bar_x, bar_y = 16, 34
-        bar_w, bar_h = 280, 18
+    def _spells(self,selected,mana):
+        n_spells=8; btn=70; gap=6
+        total=n_spells*(btn+gap)-gap
+        start_x=(SCREEN_W-total)//2; start_y=8
 
-        # Background
-        pygame.draw.rect(self._panel_surf, (20, 20, 40), (bar_x, bar_y, bar_w, bar_h))
+        self._spell_rects=[]
+        for i in range(n_spells):
+            x=start_x+i*(btn+gap)
+            rect=pygame.Rect(x,start_y,btn,btn-4)
+            self._spell_rects.append(rect)
 
-        # Fill
-        fill = int(bar_w * mana / MAX_MANA)
-        pulse = 0.85 + 0.15 * math.sin(self._tick * 3)
-        r = int(60  * pulse)
-        g = int(160 * pulse)
-        b = int(255 * pulse)
-        if fill > 0:
-            pygame.draw.rect(self._panel_surf, (r, g, b), (bar_x, bar_y, fill, bar_h))
+            icol,itype=_SPELL_ICONS[i]
+            cost=SPELL_COSTS[i]
+            can=mana>=cost; sel=(selected==i)
 
-        # Shimmer highlight
-        pygame.draw.rect(self._panel_surf, (180, 220, 255, 60),
-                         (bar_x, bar_y, fill, bar_h // 2))
-
-        # Border
-        pygame.draw.rect(self._panel_surf, (80, 120, 200), (bar_x, bar_y, bar_w, bar_h), 1)
-
-        # Value text
-        val = self._font_sm.render(f"{int(mana)}/{int(MAX_MANA)}", True, (200, 230, 255))
-        self._panel_surf.blit(val, (bar_x + bar_w + 6, bar_y + 2))
-
-    def _draw_power_buttons(self, selected: int, mana: float):
-        powers = list(range(6))  # P_RAISE … P_ARMA
-        btn_w, btn_h = 105, 70
-        start_x = 320
-        start_y = 8
-        gap = 8
-
-        self._power_rects = []
-
-        for i, pid in enumerate(powers):
-            x = start_x + i * (btn_w + gap)
-            rect = pygame.Rect(x, start_y, btn_w, btn_h)
-            self._power_rects.append(rect)
-
-            col = POWER_COLOURS[pid]
-            cost = POWER_COSTS[pid]
-            can_afford = mana >= cost
-            is_selected = (selected == pid)
-
-            # Button background
-            bg_alpha = 200 if is_selected else 140
-            bg = (*[max(0, c - 60) for c in col], bg_alpha)
-            pygame.draw.rect(self._panel_surf, bg, rect, border_radius=6)
+            # Background
+            bg_alpha=220 if sel else 160
+            bg=tuple(max(0,c-70) for c in icol)
+            pygame.draw.rect(self._panel,(*bg,bg_alpha),rect,border_radius=7)
 
             # Selected highlight
-            if is_selected:
-                pulse = 0.7 + 0.3 * math.sin(self._tick * 5)
-                border_c = tuple(min(255, int(c * pulse)) for c in col)
-                pygame.draw.rect(self._panel_surf, border_c, rect, 2, border_radius=6)
+            if sel:
+                p=0.6+0.4*math.sin(self._tick*5)
+                bc=tuple(min(255,int(c*p)) for c in icol)
+                pygame.draw.rect(self._panel,bc,rect,2,border_radius=7)
+                # Glow
+                glow=pygame.Surface((btn+8,btn+4),pygame.SRCALPHA)
+                pygame.draw.rect(glow,(*bc,40),(0,0,btn+8,btn+4),border_radius=9)
+                self._panel.blit(glow,(x-4,start_y-2))
             else:
-                pygame.draw.rect(self._panel_surf, (60, 60, 80), rect, 1, border_radius=6)
+                pygame.draw.rect(self._panel,(50,50,70),rect,1,border_radius=7)
 
-            # Greyed if unaffordable
-            if not can_afford:
-                grey = pygame.Surface((btn_w, btn_h), pygame.SRCALPHA)
-                grey.fill((0, 0, 0, 100))
-                self._panel_surf.blit(grey, rect.topleft)
+            if not can:
+                grey=pygame.Surface((btn,btn-4),pygame.SRCALPHA)
+                grey.fill((0,0,0,100))
+                self._panel.blit(grey,rect.topleft)
 
-            # Power name
-            name_lns = POWER_NAMES[pid].split()
-            for li, ln in enumerate(name_lns):
-                txt = self._font_sm.render(ln, True,
-                                           col if can_afford else (100, 100, 100))
-                tw = txt.get_width()
-                self._panel_surf.blit(txt, (x + btn_w // 2 - tw // 2,
-                                            start_y + 6 + li * 15))
+            # Icon drawing
+            cx2=x+btn//2; cy2=start_y+(btn-4)//2
+            self._draw_spell_icon(cx2,cy2,itype,icol,can)
 
-            # Cost label
-            if cost > 0:
-                cost_txt = self._font_sm.render(f"{cost}⚡", True,
-                                                (200, 220, 100) if can_afford else (80, 80, 80))
-                self._panel_surf.blit(cost_txt, (x + 4, start_y + btn_h - 18))
+            # Cost
+            if cost>0:
+                ct=self._f12.render(str(cost),True,
+                                    (220,220,80) if can else (80,80,80))
+                self._panel.blit(ct,(x+4,start_y+btn-18))
 
-            # Keyboard shortcut
-            keys = ['R', 'L', 'Q', 'V', 'F', 'A']
-            key_txt = self._font_sm.render(f"[{keys[i]}]", True, (120, 120, 140))
-            kw = key_txt.get_width()
-            self._panel_surf.blit(key_txt, (x + btn_w - kw - 4, start_y + btn_h - 18))
+            # Key hint
+            kt=self._f12.render(f"[{SPELL_KEYS[i]}]",True,(100,100,130))
+            self._panel.blit(kt,(x+btn-kt.get_width()-3,start_y+btn-18))
 
-    def _draw_population(self, game: 'Game'):
-        p_count = sum(1 for s in game.settlers
-                      if s.alive and s.faction == PLAYER)
-        e_count = sum(1 for s in game.settlers
-                      if s.alive and s.faction == ENEMY)
-        p_bldg  = sum(1 for b in game.buildings
-                      if b.alive and b.faction == PLAYER and b.built)
-        e_bldg  = sum(1 for b in game.buildings
-                      if b.alive and b.faction == ENEMY and b.built)
+    def _draw_spell_icon(self,cx,cy,itype,col,enabled):
+        c=col if enabled else (80,80,80)
+        if itype=='blast':
+            for r in [14,10,6]:
+                pygame.draw.circle(self._panel,c,(cx,cy),r,max(1,r//4))
+        elif itype=='bolt':
+            pts=[(cx,cy-15),(cx+4,cy-3),(cx+8,cy-3),(cx,cy+6),(cx-4,cy-2),(cx-8,cy-2)]
+            pygame.draw.polygon(self._panel,c,pts)
+        elif itype=='bridge':
+            for i in range(-12,13,4):
+                pygame.draw.rect(self._panel,c,(cx+i-2,cy-4,4,8))
+            pygame.draw.line(self._panel,c,(cx-12,cy-8),(cx+12,cy-8),2)
+        elif itype=='swamp':
+            pygame.draw.ellipse(self._panel,c,(cx-12,cy-6,24,12))
+            pygame.draw.ellipse(self._panel,c,(cx-8,cy-10,8,8))
+            pygame.draw.ellipse(self._panel,c,(cx+2,cy-10,8,8))
+        elif itype=='volcano':
+            pts=[(cx,cy-14),(cx-10,cy+6),(cx+10,cy+6)]
+            pygame.draw.polygon(self._panel,c,pts)
+            pygame.draw.polygon(self._panel,(255,80,20),[(cx,cy-14),(cx-3,cy-6),(cx+3,cy-6)])
+        elif itype=='flatten':
+            pygame.draw.line(self._panel,c,(cx-12,cy),(cx+12,cy),3)
+            for ix in [-10,-4,2,8]:
+                pygame.draw.line(self._panel,c,(cx+ix,cy-8),(cx+ix+2,cy),2)
+        elif itype=='firestorm':
+            for ix,iy in [(-8,-10),(0,-14),(8,-10),(-4,-4),(4,-4)]:
+                r=3+(abs(ix)+abs(iy))//8
+                pygame.draw.circle(self._panel,c,(cx+ix,cy+iy),r)
+        elif itype=='arma':
+            pygame.draw.circle(self._panel,c,(cx,cy),14,2)
+            for a in range(0,360,45):
+                ra=math.radians(a)
+                pygame.draw.line(self._panel,c,
+                                  (cx+int(math.cos(ra)*6),cy+int(math.sin(ra)*6)),
+                                  (cx+int(math.cos(ra)*13),cy+int(math.sin(ra)*13)),2)
 
-        x = SCREEN_W - MINIMAP_SZ - 220
-        y = 10
+    def _population(self,game:'Game'):
+        pc=sum(1 for s in game.settlers if s.alive and s.faction==PLAYER)
+        ec=sum(1 for s in game.settlers if s.alive and s.faction==ENEMY)
+        pb=sum(1 for b in game.buildings if b.alive and b.faction==PLAYER and b.built)
+        eb=sum(1 for b in game.buildings if b.alive and b.faction==ENEMY and b.built)
 
-        # Player
-        lbl = self._font_md.render(f"YOU  {p_count:>3} followers  {p_bldg} buildings",
-                                   True, C_PLAYER)
-        self._panel_surf.blit(lbl, (x, y))
+        x=SCREEN_W-MINIMAP_SZ-300; y=12
+        self._panel.blit(self._f14.render(f"YOUR TRIBE",True,C_PLAYER),(x,y))
+        self._panel.blit(self._f20.render(f"{pc} followers  {pb} huts",True,C_PLAYER),(x,y+16))
 
-        # Enemy
-        lbl = self._font_md.render(f"FOE  {e_count:>3} followers  {e_bldg} buildings",
-                                   True, C_ENEMY)
-        self._panel_surf.blit(lbl, (x, y + 22))
+        self._panel.blit(self._f14.render(f"ENEMY TRIBE",True,C_ENEMY),(x,y+42))
+        self._panel.blit(self._f20.render(f"{ec} followers  {eb} huts",True,C_ENEMY),(x,y+58))
 
-        # Controls hint
-        hint = self._font_sm.render(
-            "WASD: scroll  Scroll: zoom  LMB: use power  RMB: raise  MMB: lower",
-            True, (100, 100, 130))
-        self._panel_surf.blit(hint, (x, y + 50))
+        # Shaman status
+        if game.player_shaman:
+            sh=game.player_shaman
+            hp_t=self._f12.render(f"Shaman HP: {int(sh.hp)}/{int(sh.max_hp)}",
+                                   True,(160,210,255))
+            self._panel.blit(hp_t,(x,y+82))
 
     def _draw_notifications(self):
-        y = 20
-        for n in reversed(self._notifications):
-            alpha = min(255, int(255 * n['life']))
-            txt = self._font_lg.render(n['text'], True, n['colour'])
-            # Shadow
-            shadow = self._font_lg.render(n['text'], True, (0, 0, 0))
-            cx = SCREEN_W // 2 - txt.get_width() // 2
-            self.screen.blit(shadow, (cx + 2, (SCREEN_H - HUD_H) // 2 + y + 2))
-            self.screen.blit(txt,    (cx,     (SCREEN_H - HUD_H) // 2 + y))
-            y += 30
+        y=0
+        for n in reversed(self._notifications[-4:]):
+            txt=self._f26.render(n['text'],True,n['colour'])
+            shadow=self._f26.render(n['text'],True,(0,0,0))
+            cx=SCREEN_W//2-txt.get_width()//2
+            wy=SCREEN_H//2-80+y
+            self.screen.blit(shadow,(cx+2,wy+2))
+            self.screen.blit(txt,   (cx,  wy))
+            y+=36
 
 
 class VictoryScreen:
-    """Full-screen overlay shown when the game ends."""
-
-    def __init__(self, screen: pygame.Surface):
-        self.screen = screen
+    def __init__(self,screen):
+        self.screen=screen
         pygame.font.init()
-        self._font = pygame.font.SysFont("monospace", 48, bold=True)
-        self._sub  = pygame.font.SysFont("monospace", 22)
+        self._f48=pygame.font.SysFont("monospace",48,bold=True)
+        self._f22=pygame.font.SysFont("monospace",22)
 
-    def draw(self, winner: int):
-        overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
-        self.screen.blit(overlay, (0, 0))
-
-        if winner == PLAYER:
-            msg   = "VICTORY!"
-            sub   = "Your followers have triumphed!"
-            colour = (80, 180, 255)
+    def draw(self,winner):
+        ov=pygame.Surface((SCREEN_W,SCREEN_H),pygame.SRCALPHA)
+        ov.fill((0,0,0,170)); self.screen.blit(ov,(0,0))
+        if winner==PLAYER:
+            msg="VICTORY!"; sub="Your tribe reigns supreme!"; col=(80,180,255)
         else:
-            msg   = "DEFEAT!"
-            sub   = "The enemy has crushed your people."
-            colour = (255, 80, 80)
-
-        txt = self._font.render(msg, True, colour)
-        self.screen.blit(txt, (SCREEN_W // 2 - txt.get_width() // 2,
-                                SCREEN_H // 2 - 60))
-        sub_txt = self._sub.render(sub, True, (220, 220, 220))
-        self.screen.blit(sub_txt, (SCREEN_W // 2 - sub_txt.get_width() // 2,
-                                   SCREEN_H // 2 + 10))
-        restart = self._sub.render("Press R to restart or Q to quit", True, (150, 150, 150))
-        self.screen.blit(restart, (SCREEN_W // 2 - restart.get_width() // 2,
-                                   SCREEN_H // 2 + 50))
+            msg="DEFEATED!"; sub="Your shaman has fallen."; col=(255,80,80)
+        t=self._f48.render(msg,True,col)
+        self.screen.blit(t,(SCREEN_W//2-t.get_width()//2,SCREEN_H//2-60))
+        s=self._f22.render(sub,True,(220,220,220))
+        self.screen.blit(s,(SCREEN_W//2-s.get_width()//2,SCREEN_H//2+10))
+        r=self._f22.render("Press R to restart  |  Q to quit",True,(150,150,150))
+        self.screen.blit(r,(SCREEN_W//2-r.get_width()//2,SCREEN_H//2+50))

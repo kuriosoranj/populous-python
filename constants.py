@@ -1,92 +1,105 @@
 """
-Populous Python - Game Constants
+Populous: The Beginning — Python Edition
+Constants
 """
 
 # Screen
 SCREEN_W = 1280
 SCREEN_H = 720
 FPS = 60
-TITLE = "Populous — Python Edition"
+TITLE = "Populous: The Beginning — Python Edition"
 
-# Isometric tile dimensions (tile diamond)
-TILE_W = 64       # full width of tile diamond
-TILE_H = 32       # full height of tile diamond
-H_SCALE = 7       # pixels per height unit (vertical exaggeration)
+# Isometric tile
+TILE_W = 64
+TILE_H = 32
+H_SCALE = 8       # pixels per height unit — more dramatic than before
 
 # Grid: VERTS×VERTS vertices → (VERTS-1)×(VERTS-1) tiles
-VERTS = 65        # must give VERTS-1 tiles across
+VERTS = 65
 
-# Terrain height range
+# Terrain heights
 WATER_LEVEL = 3
 MIN_H = 0
-MAX_H = 18
+MAX_H = 20
 
 # Factions
 PLAYER = 0
 ENEMY  = 1
 
-# God powers
-P_RAISE    = 0
-P_LOWER    = 1
-P_QUAKE    = 2
-P_VOLCANO  = 3
-P_FLOOD    = 4
-P_ARMA     = 5
-
-POWER_NAMES = [
-    "Raise Land",
-    "Lower Land",
-    "Earthquake",
-    "Volcano",
-    "Flood",
-    "Armageddon",
-]
-
-POWER_COSTS = {
-    P_RAISE:   0,
-    P_LOWER:   0,
-    P_QUAKE:  10,
-    P_VOLCANO:25,
-    P_FLOOD:  20,
-    P_ARMA:  100,
-}
-
-MAX_MANA = 100.0
-MANA_RATE = 0.04   # mana gained per follower per second
-
-# Settler behaviour
-SETTLER_SPEED     = 1.8   # grid tiles per second
-SETTLER_VISION    = 10.0  # grid tiles
-FIGHT_RANGE       = 1.5
-BUILD_FLAT_THRESH = 1     # max vertex height diff to start building
-BUILD_TIME        = 6.0   # seconds to erect a building
-SPAWN_INTERVAL    = 30.0  # seconds between new settlers from a house
-FIGHT_DAMAGE      = 0.8   # HP per second
-SETTLER_MAX_HP    = 5.0
+# Entity types
+E_SHAMAN   = 0
+E_BRAVE    = 1
+E_WARRIOR  = 2
+E_FIREWARRIOR = 3
 
 # Building types
-B_HUT      = 0
-B_HOUSE    = 1
-B_MANSION  = 2
-B_CASTLE   = 3
+B_HUT        = 0   # basic dwelling, spawns braves
+B_GUARD_POST = 1   # defensive tower
+B_WARRIOR_HUT= 2   # trains warriors
+B_FIREWARRIOR_HUT = 3
 
-BUILDING_CAPACITY  = {B_HUT: 1, B_HOUSE: 2, B_MANSION: 4, B_CASTLE: 8}
-BUILDING_UPGRADE_T = {B_HUT: 20.0, B_HOUSE: 40.0, B_MANSION: 80.0}  # seconds till upgrade
+BUILDING_CAPACITY = {B_HUT: 5, B_GUARD_POST: 0, B_WARRIOR_HUT: 0, B_FIREWARRIOR_HUT: 0}
+BUILDING_NAMES    = {B_HUT: "Hut", B_GUARD_POST: "Guard Post",
+                     B_WARRIOR_HUT: "Warrior Hut", B_FIREWARRIOR_HUT: "Firewarrior Hut"}
+BUILD_TIME        = {B_HUT: 5.0, B_GUARD_POST: 8.0,
+                     B_WARRIOR_HUT: 10.0, B_FIREWARRIOR_HUT: 10.0}
 
-# Colours  (kept as module-level tuples)
-C_WATER_ABYSS   = (8,   42, 108)
-C_WATER_DEEP    = (18,  65, 160)
-C_WATER_SHALLOW = (42, 110, 215)
-C_SAND          = (205, 180, 115)
-C_GRASS_LO      = (98,  170,  52)
-C_GRASS_MID     = (72,  142,  38)
-C_GRASS_HI      = (52,  112,  26)
-C_ROCK          = (105, 97,   87)
-C_SNOW          = (218, 224, 248)
+# PTB Spells
+SP_BLAST       = 0
+SP_LIGHTNING   = 1
+SP_LANDBRIDGE  = 2
+SP_SWAMP       = 3
+SP_VOLCANO     = 4
+SP_FLATTEN     = 5
+SP_FIRESTORM   = 6
+SP_ARMAGEDDON  = 7
 
-C_PLAYER        = (70,  130, 255)
-C_ENEMY         = (255,  55,  55)
+SPELL_NAMES = [
+    "Blast", "Lightning", "Landbridge",
+    "Swamp", "Volcano", "Flatten",
+    "Firestorm", "Armageddon",
+]
+SPELL_COSTS = {
+    SP_BLAST:      5,
+    SP_LIGHTNING:  10,
+    SP_LANDBRIDGE: 15,
+    SP_SWAMP:      15,
+    SP_VOLCANO:    35,
+    SP_FLATTEN:    8,
+    SP_FIRESTORM:  40,
+    SP_ARMAGEDDON: 100,
+}
+SPELL_KEYS = ['1','2','3','4','5','6','7','8']
 
-# HUD layout
-HUD_H       = 110
-MINIMAP_SZ  = 150
+MAX_MANA  = 100.0
+MANA_RATE = 0.03   # per follower per second (braves only)
+
+# Entity stats
+SHAMAN_HP   = 30.0
+BRAVE_HP    = 3.0
+WARRIOR_HP  = 8.0
+FIREWARRIOR_HP = 5.0
+
+BRAVE_SPEED    = 2.2   # tiles/sec
+WARRIOR_SPEED  = 2.8
+SHAMAN_SPEED   = 3.0
+FOLLOW_RADIUS  = 12.0  # braves follow shaman if within this range
+BUILD_RADIUS   = 5.0   # braves build within this distance of shaman
+
+FIGHT_RANGE    = 1.8
+BRAVE_DMG      = 0.4
+WARRIOR_DMG    = 1.2
+SHAMAN_DMG     = 2.0
+FIREWARRIOR_DMG = 0.8
+FIREWARRIOR_RANGE = 6.0
+
+# Brave → Warrior conversion (at warrior hut)
+TRAIN_TIME = 15.0
+
+# Colours
+C_PLAYER = (50,  140, 255)
+C_ENEMY  = (255,  60,  60)
+
+# HUD
+HUD_H      = 100
+MINIMAP_SZ = 150
